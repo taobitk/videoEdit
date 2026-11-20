@@ -1,0 +1,1 @@
+# Keep dist directory tracked so `go:embed all:dist` succeeds before first frontend build.

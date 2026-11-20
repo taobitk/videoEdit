@@ -1,0 +1,19 @@
+# Compiled binaries & build outputs
+*.exe
+*.exe~
+frontend/build/
+frontend/.svelte-kit/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+backend/cmd/velocity/dist/*
+!backend/cmd/velocity/dist/.gitkeep
+
+# User media & temporary outputs
+downloads/
+uploads/
+
+# IDE & OS
+.vscode/
+.DS_Store
+Thumbs.db
