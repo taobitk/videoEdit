@@ -14,6 +14,7 @@ type EncoderConfig struct {
 	Codec             string // "h264" or "hevc"
 	Preset            string // e.g. "p4" or "medium"
 	QualityMode       string // "auto_cap", "compact", "high"
+	CQ                int    // 20..28 (default 20)
 	SourceBitrateKbps int
 	Speed             float64
 	ZeroCopyMidArgs   []string
@@ -62,7 +63,7 @@ func RunWith3TierFallback(
 	cfg EncoderConfig,
 	hooks JobHooks,
 ) error {
-	if !cfg.UseGPU {
+	if !cfg.UseGPU || strings.EqualFold(cfg.Codec, "av1") {
 		return runTier(ctx, ffmpegPath, videoInputs, extraInputArgs, midArgs, outputPath, totalTargetSecs, offsetSecs, cfg, tierCPUEncode, hooks)
 	}
 

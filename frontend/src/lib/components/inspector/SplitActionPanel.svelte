@@ -11,18 +11,20 @@
     codec: CodecId;
     preset: PresetId;
     qualityMode: QualityMode;
+    cq: number;
     capabilities: SystemCapabilities | null;
     onChangeAccurate: (v: boolean) => void;
     onChangeGpu: (v: boolean) => void;
     onChangeCodec: (c: CodecId) => void;
     onChangePreset: (p: PresetId) => void;
     onChangeQualityMode: (q: QualityMode) => void;
+    onChangeCq: (q: number) => void;
     onStartSplit: () => void;
   }
 
   let {
-    canStart, segmentCount, accurate, useGpu, codec, preset, qualityMode, capabilities,
-    onChangeAccurate, onChangeGpu, onChangeCodec, onChangePreset, onChangeQualityMode, onStartSplit
+    canStart, segmentCount, accurate, useGpu, codec, preset, qualityMode, cq, capabilities,
+    onChangeAccurate, onChangeGpu, onChangeCodec, onChangePreset, onChangeQualityMode, onChangeCq, onStartSplit
   }: Props = $props();
 </script>
 
@@ -71,8 +73,8 @@
 
   {#if accurate}
     <GpuEncoderSettings
-      {useGpu} {codec} {preset} {qualityMode} {capabilities}
-      {onChangeGpu} {onChangeCodec} {onChangePreset} {onChangeQualityMode}
+      {useGpu} {codec} {preset} {qualityMode} {cq} {capabilities}
+      {onChangeGpu} {onChangeCodec} {onChangePreset} {onChangeQualityMode} {onChangeCq}
     />
   {/if}
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
 #include <string>
 
 extern "C" {
@@ -89,6 +90,8 @@ public:
         return true;
     }
 
+    void setMuxMutex(std::mutex* mu) { muxMu_ = mu; }
+
     void resetDecoderForSeek() {
         if (decCtx_) avcodec_flush_buffers(decCtx_);
     }
@@ -147,7 +150,12 @@ private:
         while (avcodec_receive_packet(encCtx_, encPkt_) == 0) {
             av_packet_rescale_ts(encPkt_, encCtx_->time_base, outStream_->time_base);
             encPkt_->stream_index = outStream_->index;
-            av_interleaved_write_frame(outFmt_, encPkt_);
+            if (muxMu_) {
+                std::lock_guard<std::mutex> lk(*muxMu_);
+                av_interleaved_write_frame(outFmt_, encPkt_);
+            } else {
+                av_interleaved_write_frame(outFmt_, encPkt_);
+            }
             av_packet_unref(encPkt_);
         }
     }
@@ -171,4 +179,5 @@ private:
     AVFrame *inFrm_ = nullptr, *filtFrm_ = nullptr;
     AVPacket* encPkt_ = nullptr;
     int64_t lastInPts_ = AV_NOPTS_VALUE;
+    std::mutex* muxMu_ = nullptr;
 };

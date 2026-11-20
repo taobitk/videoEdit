@@ -23,6 +23,7 @@
     codec: CodecId;
     preset: PresetId;
     qualityMode: QualityMode;
+    cq: number;
     capabilities: SystemCapabilities | null;
     layers: OverlayLayer[];
     selectedLayer: OverlayLayer | null;
@@ -35,6 +36,7 @@
     onChangeCodec: (c: CodecId) => void;
     onChangePreset: (p: PresetId) => void;
     onChangeQualityMode: (q: QualityMode) => void;
+    onChangeCq: (q: number) => void;
     onAddText: () => void;
     onPickImage: () => void;
     onAddImagePath: (p: string) => void;
@@ -54,9 +56,9 @@
   }
 
   let {
-    canStart, speed, videoFilter, useGpu, codec, preset, qualityMode, capabilities,
+    canStart, speed, videoFilter, useGpu, codec, preset, qualityMode, cq, capabilities,
     layers, selectedLayer, canUndo, canRedo, layerError,
-    onSpeedChange, onFilterChange, onChangeGpu, onChangeCodec, onChangePreset, onChangeQualityMode,
+    onSpeedChange, onFilterChange, onChangeGpu, onChangeCodec, onChangePreset, onChangeQualityMode, onChangeCq,
     onAddText, onPickImage, onAddImagePath, onSelectLayer, onMoveZ, onReorderLayer, onToggleVisible,
     onRemoveLayer, onUpdateLayer, onSnapLayer, onSetLayerIn, onSetLayerOut, onLayerFullSpan,
     onUndo, onRedo, onStartRender
@@ -170,8 +172,8 @@
   {/if}
 
   <GpuEncoderSettings
-    {useGpu} {codec} {preset} {qualityMode} {capabilities}
-    {onChangeGpu} {onChangeCodec} {onChangePreset} {onChangeQualityMode}
+    {useGpu} {codec} {preset} {qualityMode} {cq} {capabilities}
+    {onChangeGpu} {onChangeCodec} {onChangePreset} {onChangeQualityMode} {onChangeCq}
   />
 
   <button

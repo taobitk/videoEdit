@@ -61,7 +61,7 @@ func CanUseCudaColorRunner(req model.ProcessRequest, probe ProbeInfo, speed floa
 			hasTrim = true
 		}
 	}
-	return hasColor || len(layers) > 0 || hasTrim || math.Abs(speed-1.0) > 0.001
+	return hasColor || len(layers) > 0 || hasTrim || math.Abs(speed-1.0) > 0.001 || strings.EqualFold(req.Codec, "av1")
 }
 
 // BuildCudaExtraArgs builds --trim, --speed, --atempo, and --overlay flags for velocity-cuda.exe.
@@ -158,19 +158,24 @@ func RunCudaColorJob(
 		}
 	})
 
-	isHEVC := strings.EqualFold(cfg.Codec, "hevc") || strings.EqualFold(cfg.Codec, "h265")
+	isAV1 := strings.EqualFold(cfg.Codec, "av1") || strings.EqualFold(cfg.Codec, "svtav1")
+	isHEVC := !isAV1 && (strings.EqualFold(cfg.Codec, "hevc") || strings.EqualFold(cfg.Codec, "h265"))
 	codec := "h264"
 	encName := "h264_nvenc"
-	if isHEVC {
+	if isAV1 {
+		codec = "av1"
+		encName = "libsvtav1"
+	} else if isHEVC {
 		codec = "hevc"
 		encName = "hevc_nvenc"
 	}
 	preset := strings.TrimSpace(cfg.Preset)
-	if preset == "" {
+	if isAV1 {
+		preset = mapSVTPreset(preset)
+	} else if preset == "" {
 		preset = "p4"
 	}
-	mode := model.NormalizeQualityMode(cfg.QualityMode)
-	cq, rateArgs := resolveQualityAndCap(mode, isHEVC, cfg.SourceBitrateKbps, cfg.Speed)
+	cq, rateArgs := resolveQualityAndCap(codec, cfg.CQ)
 	maxrate := "0"
 	for i := 0; i+1 < len(rateArgs); i++ {
 		if rateArgs[i] == "-maxrate" {
@@ -186,7 +191,11 @@ func RunCudaColorJob(
 		color = "none"
 	}
 	if hooks.SetEncoder != nil {
-		hooks.SetEncoder("GPU", fmt.Sprintf("%s (CUDA NVRTC Zero-Copy+NVENC, Preset: %s, %s)", encName, preset, mode))
+		if isAV1 {
+			hooks.SetEncoder("HYBRID", fmt.Sprintf("libsvtav1 (GPU CUDA Filter + CPU SVT-AV1, Preset: %s, CRF %s)", preset, cq))
+		} else {
+			hooks.SetEncoder("GPU", fmt.Sprintf("%s (CUDA NVRTC Zero-Copy+NVENC, Preset: %s, CQ %s)", encName, preset, cq))
+		}
 	}
 	args := []string{
 		"--input", inputPath,

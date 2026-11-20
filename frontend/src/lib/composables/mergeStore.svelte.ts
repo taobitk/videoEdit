@@ -8,7 +8,8 @@ export function createMergeStore() {
     useGpu: true,
     codec: 'h264' as CodecId,
     preset: 'p4' as PresetId,
-    qualityMode: 'auto_cap' as QualityMode
+    qualityMode: 'high' as QualityMode,
+    cq: 20
   });
 
   async function addPath(path: string) {

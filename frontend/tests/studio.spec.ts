@@ -97,6 +97,25 @@ test('9:16 Konva geometry, icon text controls, 9-pt align, zero values, and qual
     expect(stageBox.x).toBeGreaterThan(viewportBox.x);
   }
 
+  // CQ slider (20..28) updates badge live
+  await expect(page.getByTestId('cq-val-display')).toContainText('CQ 20');
+  await page.getByTestId('input-cq').fill('24');
+  await page.getByTestId('input-cq').dispatchEvent('input');
+  await expect(page.getByTestId('cq-val-display')).toContainText('CQ 24');
+  await page.getByTestId('input-cq').fill('28');
+  await page.getByTestId('input-cq').dispatchEvent('input');
+  await expect(page.getByTestId('cq-val-display')).toContainText('CQ 28');
+
+  // Switching Codec to AV1 swaps Preset to SVT-AV1 (8) and Quality slider to CRF 30 (24..38)
+  await page.getByTestId('select-codec').selectOption('av1');
+  await expect(page.getByTestId('select-preset')).toHaveValue('8');
+  await expect(page.getByTestId('cq-val-display')).toContainText('CRF 30');
+  await expect(page.getByTestId('input-cq')).toHaveAttribute('min', '24');
+  await expect(page.getByTestId('input-cq')).toHaveAttribute('max', '38');
+  await page.getByTestId('select-codec').selectOption('hevc');
+  await expect(page.getByTestId('select-preset')).toHaveValue('p4');
+  await expect(page.getByTestId('cq-val-display')).toContainText('CQ 20');
+
   // Add text layer + test multiline %, S/M/L/XL, opacity=0, bgPadding=0, 9-pt align, timing bar
   await page.getByTestId('btn-add-text-layer').click();
   await page.getByTestId('input-text-content').fill('Giảm 50%\nHôm nay');

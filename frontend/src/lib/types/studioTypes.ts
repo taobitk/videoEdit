@@ -2,8 +2,8 @@ export type WorkspaceTab = 'edit' | 'split' | 'merge';
 
 export type VideoFilterId = 'none' | 'grayscale' | 'sepia' | 'warm' | 'cool' | 'vibrant';
 
-export type CodecId = 'h264' | 'hevc';
-export type PresetId = 'p1' | 'p4' | 'p7';
+export type CodecId = 'h264' | 'hevc' | 'av1';
+export type PresetId = 'p1' | 'p4' | 'p7' | '10' | '8' | '6';
 export type QualityMode = 'auto_cap' | 'compact' | 'high';
 export type FontWeightOption = 'bold' | 'normal';
 export type SplitMode = 'markers' | 'uniform';
@@ -110,6 +110,7 @@ export interface ProcessPayload {
   codec: CodecId;
   preset: PresetId;
   quality_mode: QualityMode;
+  cq: number;
   video_filter: VideoFilterId;
   trim_enabled: boolean;
   trim_segments: Array<{ start: number; end: number }>;
@@ -127,6 +128,7 @@ export interface SplitPayload {
   codec: CodecId;
   preset: PresetId;
   quality_mode: QualityMode;
+  cq: number;
 }
 
 export interface MergePayload {
@@ -135,6 +137,7 @@ export interface MergePayload {
   codec: CodecId;
   preset: PresetId;
   quality_mode: QualityMode;
+  cq: number;
 }
 
 export interface OutputFileItem {

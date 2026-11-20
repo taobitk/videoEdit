@@ -139,53 +139,57 @@ func TestEncoderArgsForTierQualityModes(t *testing.T) {
 		mustExclude []string
 	}{
 		{
-			name: "auto_cap_hevc_nvenc_speed_1_2",
+			name: "default_zero_cq_uses_20",
 			cfg: EncoderConfig{
-				UseGPU: true, Codec: "hevc", Preset: "p4",
-				QualityMode: "auto_cap", SourceBitrateKbps: 676, Speed: 1.2,
+				UseGPU: true, Codec: "hevc", Preset: "p4", CQ: 0,
 			},
 			tier:        tierCUDAAndNVENC,
 			mustContain: []string{"-c:v hevc_nvenc", "-rc vbr -b:v 0 -cq 20 -spatial_aq 1", "-tag:v hvc1"},
 			mustExclude: []string{"-maxrate", "-bufsize"},
 		},
 		{
-			name: "auto_cap_default_empty_hevc_cpu",
+			name: "custom_cq_24_hevc_nvenc",
 			cfg: EncoderConfig{
-				UseGPU: false, Codec: "hevc", Preset: "p4",
-				QualityMode: "", SourceBitrateKbps: 676, Speed: 1.2,
+				UseGPU: true, Codec: "hevc", Preset: "p7", CQ: 24,
+			},
+			tier:        tierCUDAAndNVENC,
+			mustContain: []string{"-c:v hevc_nvenc", "-preset p7", "-rc vbr -b:v 0 -cq 24 -spatial_aq 1"},
+			mustExclude: []string{"-maxrate", "-bufsize"},
+		},
+		{
+			name: "custom_cq_28_clamped_from_35_cpu",
+			cfg: EncoderConfig{
+				UseGPU: false, Codec: "hevc", Preset: "p7", CQ: 35,
 			},
 			tier:        tierCPUEncode,
-			mustContain: []string{"-c:v libx265", "-crf 20", "-tag:v hvc1"},
+			mustContain: []string{"-c:v libx265", "-crf 28", "-tag:v hvc1"},
 			mustExclude: []string{"-maxrate", "-bufsize"},
 		},
 		{
-			name: "compact_hevc_nvenc_uses_high_cq_20",
+			name: "clamped_low_cq_12_uses_20",
 			cfg: EncoderConfig{
-				UseGPU: true, Codec: "hevc", Preset: "p4",
-				QualityMode: "compact", SourceBitrateKbps: 602, Speed: 1.0,
-			},
-			tier:        tierCUDAAndNVENC,
-			mustContain: []string{"-c:v hevc_nvenc", "-rc vbr -b:v 0 -cq 20 -spatial_aq 1"},
-			mustExclude: []string{"-maxrate", "-bufsize"},
-		},
-		{
-			name: "high_hevc_nvenc_no_maxrate",
-			cfg: EncoderConfig{
-				UseGPU: true, Codec: "hevc", Preset: "p4",
-				QualityMode: "high", SourceBitrateKbps: 676, Speed: 1.2,
-			},
-			tier:        tierCUDAAndNVENC,
-			mustContain: []string{"-c:v hevc_nvenc", "-rc vbr -b:v 0 -cq 20 -spatial_aq 1"},
-			mustExclude: []string{"-maxrate", "-bufsize"},
-		},
-		{
-			name: "high_h264_cpu_no_maxrate",
-			cfg: EncoderConfig{
-				UseGPU: false, Codec: "h264", Preset: "p4",
-				QualityMode: "high", SourceBitrateKbps: 1000, Speed: 1.0,
+				UseGPU: false, Codec: "h264", Preset: "p4", CQ: 12,
 			},
 			tier:        tierCPUEncode,
 			mustContain: []string{"-c:v libx264", "-crf 20"},
+			mustExclude: []string{"-maxrate", "-bufsize"},
+		},
+		{
+			name: "av1_libsvtav1_hybrid_maps_preset_and_crf",
+			cfg: EncoderConfig{
+				UseGPU: true, Codec: "av1", Preset: "8", CQ: 30,
+			},
+			tier:        tierCPUEncode,
+			mustContain: []string{"-c:v libsvtav1 -preset 8 -crf 30 -pix_fmt yuv420p"},
+			mustExclude: []string{"-maxrate", "-bufsize"},
+		},
+		{
+			name: "av1_clamped_high_crf_45_to_38",
+			cfg: EncoderConfig{
+				UseGPU: true, Codec: "av1", Preset: "p1", CQ: 45,
+			},
+			tier:        tierCPUEncode,
+			mustContain: []string{"-c:v libsvtav1 -preset 10 -crf 38"},
 			mustExclude: []string{"-maxrate", "-bufsize"},
 		},
 	}

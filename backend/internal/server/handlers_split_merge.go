@@ -67,6 +67,7 @@ func (s *Server) handleSplit(w http.ResponseWriter, r *http.Request) {
 		Codec:             codec,
 		Preset:            req.Preset,
 		QualityMode:       model.NormalizeQualityMode(req.QualityMode),
+		CQ:                model.NormalizeCQForCodec(codec, req.CQ),
 		SourceBitrateKbps: probe.BitrateKbps,
 		Speed:             1.0,
 	}
@@ -172,6 +173,7 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 		Codec:             codec,
 		Preset:            req.Preset,
 		QualityMode:       model.NormalizeQualityMode(req.QualityMode),
+		CQ:                model.NormalizeCQForCodec(codec, req.CQ),
 		SourceBitrateKbps: srcBitrate,
 		Speed:             1.0,
 	}

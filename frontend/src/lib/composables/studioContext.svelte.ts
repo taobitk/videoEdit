@@ -24,6 +24,7 @@ export function createStudioContext() {
       codec: workspace.state.codec,
       preset: workspace.state.preset,
       quality_mode: workspace.state.qualityMode,
+      cq: workspace.state.cq,
       video_filter: workspace.state.videoFilter,
       trim_enabled: workspace.state.trimEnabled,
       trim_segments: workspace.state.trimEnabled
@@ -47,7 +48,8 @@ export function createStudioContext() {
       use_gpu: split.state.useGpu,
       codec: split.state.codec,
       preset: split.state.preset,
-      quality_mode: split.state.qualityMode
+      quality_mode: split.state.qualityMode,
+      cq: split.state.cq
     });
   }
 
@@ -58,7 +60,8 @@ export function createStudioContext() {
       use_gpu: merge.state.useGpu,
       codec: merge.state.codec,
       preset: merge.state.preset,
-      quality_mode: merge.state.qualityMode
+      quality_mode: merge.state.qualityMode,
+      cq: merge.state.cq
     });
   }
 

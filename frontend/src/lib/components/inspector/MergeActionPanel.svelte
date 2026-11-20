@@ -9,17 +9,19 @@
     codec: CodecId;
     preset: PresetId;
     qualityMode: QualityMode;
+    cq: number;
     capabilities: SystemCapabilities | null;
     onChangeGpu: (v: boolean) => void;
     onChangeCodec: (c: CodecId) => void;
     onChangePreset: (p: PresetId) => void;
     onChangeQualityMode: (q: QualityMode) => void;
+    onChangeCq: (q: number) => void;
     onStartMerge: () => void;
   }
 
   let {
-    clipCount, useGpu, codec, preset, qualityMode, capabilities,
-    onChangeGpu, onChangeCodec, onChangePreset, onChangeQualityMode, onStartMerge
+    clipCount, useGpu, codec, preset, qualityMode, cq, capabilities,
+    onChangeGpu, onChangeCodec, onChangePreset, onChangeQualityMode, onChangeCq, onStartMerge
   }: Props = $props();
 </script>
 
@@ -42,8 +44,8 @@
   </div>
 
   <GpuEncoderSettings
-    {useGpu} {codec} {preset} {qualityMode} {capabilities}
-    {onChangeGpu} {onChangeCodec} {onChangePreset} {onChangeQualityMode}
+    {useGpu} {codec} {preset} {qualityMode} {cq} {capabilities}
+    {onChangeGpu} {onChangeCodec} {onChangePreset} {onChangeQualityMode} {onChangeCq}
   />
 
   <button

@@ -64,6 +64,7 @@ type ProcessRequest struct {
 	Codec         string        `json:"codec"`
 	Preset        string        `json:"preset"`
 	QualityMode   string        `json:"quality_mode"`
+	CQ            int           `json:"cq"`
 	VideoFilter   string        `json:"video_filter"`
 	TrimEnabled   bool          `json:"trim_enabled"`
 	TrimSegments  []TrimSegment `json:"trim_segments"`
@@ -88,6 +89,7 @@ type SplitRequest struct {
 	Codec           string    `json:"codec"`
 	Preset          string    `json:"preset"`
 	QualityMode     string    `json:"quality_mode"`
+	CQ              int       `json:"cq"`
 }
 
 // MergeFileEntry identifies a single input clip for POST /api/merge.
@@ -104,6 +106,7 @@ type MergeRequest struct {
 	Codec       string           `json:"codec"`
 	Preset      string           `json:"preset"`
 	QualityMode string           `json:"quality_mode"`
+	CQ          int              `json:"cq"`
 }
 
 // ResolveLayers returns Z-ordered layers, falling back to legacy overlay slices.
@@ -137,8 +140,10 @@ func NormalizeCodec(raw string) (string, error) {
 		return "h264", nil
 	case "hevc", "h265", "x265":
 		return "hevc", nil
+	case "av1", "svtav1", "libsvtav1":
+		return "av1", nil
 	default:
-		return "", fmt.Errorf("unsupported codec %q (expected h264 or hevc)", raw)
+		return "", fmt.Errorf("unsupported codec %q (expected h264, hevc or av1)", raw)
 	}
 }
 
@@ -152,6 +157,37 @@ func NormalizeQualityMode(raw string) string {
 	default:
 		return "auto_cap"
 	}
+}
+
+// NormalizeCQ clamps CQ to the safe [20, 28] range for H.264/HEVC, defaulting to 20.
+func NormalizeCQ(cq int) int {
+	return NormalizeCQForCodec("h264", cq)
+}
+
+// NormalizeCQForCodec normalizes quality target per codec (AV1 CRF 24..38 def 30; NVENC CQ 20..28 def 20).
+func NormalizeCQForCodec(codec string, cq int) int {
+	if strings.EqualFold(strings.TrimSpace(codec), "av1") || strings.EqualFold(strings.TrimSpace(codec), "svtav1") {
+		if cq <= 0 {
+			return 30
+		}
+		if cq < 24 {
+			return 24
+		}
+		if cq > 38 {
+			return 38
+		}
+		return cq
+	}
+	if cq <= 0 {
+		return 20
+	}
+	if cq < 20 {
+		return 20
+	}
+	if cq > 28 {
+		return 28
+	}
+	return cq
 }
 
 // ResolveInputPath resolves either a local file path or an uploaded filename inside uploadsDir.

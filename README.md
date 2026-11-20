@@ -5,8 +5,11 @@
 ---
 
 ## 🛠️ Tính năng nổi bật
-* **100% Zero-Copy CUDA Pipeline (`velocity-cuda.exe`)**: Giải mã phần cứng **NVDEC** (`H.264`, `HEVC`, `AV1`) → Lọc màu BT.709 & trộn Alpha Overlay PNG ngay trên VRAM bằng **CUDA NVRTC** → **NVENC** (`h264_nvenc` / `hevc_nvenc`), không copy khung hình qua CPU RAM.
-* **Chất lượng hình ảnh Pure `CQ 20` + `spatial_aq = 1`**: Khóa mặc định chế độ nét cao, không bóp trần bitrate `-maxrate`, giữ nguyên độ nét chi tiết (SSIM `~0.998`).
+* **100% Zero-Copy CUDA Pipeline (`velocity-cuda.exe`)**: Giải mã phần cứng **NVDEC** (`H.264`, `HEVC`, `AV1`) → Lọc màu BT.709 & trộn Alpha Overlay PNG ngay trên VRAM bằng **CUDA NVRTC** → đi thẳng vào **NVENC** (`h264_nvenc` / `hevc_nvenc`), không copy khung hình qua CPU RAM (tới **100% Video Encode** trên RTX 3060).
+* **Hybrid GPU CUDA + Async CPU `AV1` (`libsvtav1` + `av1_async.hpp`)**: GPU gánh giải mã, lọc màu & trộn overlay; hàng đợi RAM 16 khung hình bất đồng bộ đẩy sang CPU nén **AV1 (`SVT-AV1`)** siêu nhẹ tương đương chuẩn YouTube (`~143 fps` ở Preset `10`).
+* **Kiểm soát chất lượng thích ứng theo Codec (`CQ` / `CRF` không bóp `-maxrate`)**:
+  * **`H.264` / `HEVC` (NVENC)**: Pure CQ VBR (`-b:v 0 -spatial_aq 1`), chọn Preset `p1 / p4 / p7` và thanh trượt **`CQ 20–28`** (mặc định `20`, SSIM `~0.998`).
+  * **`AV1` (`SVT-AV1`)**: Giao diện tự động chuyển sang Preset **`10 / 8 / 6`** và thanh trượt **`CRF 24–38`** (mặc định `30`).
 * **Hỗ trợ đầy đủ NLE Timeline**:
   * **Biên tập**: Multi-track timeline (`interactjs`), 5 bộ lọc màu (`grayscale`, `sepia`, `warm`, `cool`, `vibrant`), thêm chữ/ảnh phủ WYSIWYG (Konva rasterized PNG), cắt nhiều đoạn (`trim`), đổi tốc độ `0.25x–4x` kèm đồng bộ âm thanh `atempo`.
   * **Chia & Ghép video**: Chia theo mốc hoặc chia đều nhiều phần (`/api/split`), ghép nhiều clip khác độ phân giải (`/api/merge`).
@@ -62,7 +65,7 @@ Click đúp vào `velocity.exe` (hoặc chạy `.\velocity.exe` trong terminal).
 ---
 
 ## 📁 Cấu trúc thư mục
-* `cuda_render/`: Engine C++ CUDA NVRTC Zero-Copy (`main.cpp`, `cuda_color.hpp`, `cuda_overlay.hpp`, `ff_audio.hpp`).
-* `backend/`: Server Go (`cmd/velocity`), điều phối FFmpeg/CUDA (`internal/ffmpeg`), API & Real-GPU E2E tests (`internal/server`), toán học timeline/geometry (`internal/mathutil`).
+* `cuda_render/`: Engine C++ CUDA NVRTC Zero-Copy & Hybrid AV1 (`main.cpp`, `cuda_color.hpp`, `cuda_overlay.hpp`, `ff_audio.hpp`, `av1_async.hpp`).
+* `backend/`: Server Go (`cmd/velocity`), điều phối FFmpeg/CUDA (`internal/ffmpeg`), API & Real-GPU/AV1 E2E tests (`internal/server`: `e2e_cuda_test.go`, `e2e_av1_test.go`), toán học timeline/geometry (`internal/mathutil`).
 * `frontend/`: Giao diện SvelteKit 5 + Konva.js + Tailwind (`src/`) và bộ test Playwright (`tests/`).
 * `build.ps1`: Script build & test hợp nhất một chạm.

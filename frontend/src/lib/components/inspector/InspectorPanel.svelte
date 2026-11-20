@@ -28,6 +28,7 @@
       codec={workspace.state.codec}
       preset={workspace.state.preset}
       qualityMode={workspace.state.qualityMode}
+      cq={workspace.state.cq}
       capabilities={workspace.state.capabilities}
       layers={overlay.layers}
       selectedLayer={overlay.selectedLayer}
@@ -40,6 +41,7 @@
       onChangeCodec={(c) => (workspace.state.codec = c)}
       onChangePreset={(p) => (workspace.state.preset = p)}
       onChangeQualityMode={(q) => (workspace.state.qualityMode = q)}
+      onChangeCq={(q) => (workspace.state.cq = q)}
       onAddText={ctx.addTextAtPlayhead}
       onPickImage={overlay.pickAndAddImageLayer}
       onAddImagePath={(p) => overlay.addImageLayer(p)}
@@ -71,12 +73,14 @@
       codec={split.state.codec}
       preset={split.state.preset}
       qualityMode={split.state.qualityMode}
+      cq={split.state.cq}
       capabilities={workspace.state.capabilities}
       onChangeAccurate={(v) => (split.state.accurate = v)}
       onChangeGpu={(v) => (split.state.useGpu = v)}
       onChangeCodec={(c) => (split.state.codec = c)}
       onChangePreset={(p) => (split.state.preset = p)}
       onChangeQualityMode={(q) => (split.state.qualityMode = q)}
+      onChangeCq={(q) => (split.state.cq = q)}
       onStartSplit={startSplit}
     />
   {:else}
@@ -86,11 +90,13 @@
       codec={merge.state.codec}
       preset={merge.state.preset}
       qualityMode={merge.state.qualityMode}
+      cq={merge.state.cq}
       capabilities={workspace.state.capabilities}
       onChangeGpu={(v) => (merge.state.useGpu = v)}
       onChangeCodec={(c) => (merge.state.codec = c)}
       onChangePreset={(p) => (merge.state.preset = p)}
       onChangeQualityMode={(q) => (merge.state.qualityMode = q)}
+      onChangeCq={(q) => (merge.state.cq = q)}
       onStartMerge={startMerge}
     />
   {/if}

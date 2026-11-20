@@ -110,6 +110,7 @@ func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 		Codec:             codec,
 		Preset:            req.Preset,
 		QualityMode:       model.NormalizeQualityMode(req.QualityMode),
+		CQ:                model.NormalizeCQForCodec(codec, req.CQ),
 		SourceBitrateKbps: probe.BitrateKbps,
 		Speed:             speed,
 		ZeroCopyMidArgs:   zeroCopyMidArgs,

@@ -1,13 +1,16 @@
+#include "av1_async.hpp"
 #include "cuda_color.hpp"
 #include "cuda_overlay.hpp"
 #include "ff_audio.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -182,8 +185,14 @@ int main() {
         return 1;
     }
 
-    const bool isHEVC = (opt.codec == "hevc" || opt.codec == "h265");
-    const AVCodec* enc = avcodec_find_encoder_by_name(isHEVC ? "hevc_nvenc" : "h264_nvenc");
+    const bool isAV1 = (opt.codec == "av1" || opt.codec == "svtav1");
+    const bool isHEVC = !isAV1 && (opt.codec == "hevc" || opt.codec == "h265");
+    const char* encName = isAV1 ? "libsvtav1" : (isHEVC ? "hevc_nvenc" : "h264_nvenc");
+    const AVCodec* enc = avcodec_find_encoder_by_name(encName);
+    if (!enc) {
+        std::fprintf(stderr, "Encoder not found: %s\n", encName);
+        return 1;
+    }
     AVStream* outVStream = avformat_new_stream(outFmt, nullptr);
     AVCodecContext* encCtx = avcodec_alloc_context3(enc);
 
@@ -213,6 +222,54 @@ int main() {
     AVBSFContext* bsfCtx = nullptr;
     bool bypassFilter = false;
     bool pipelineReady = false;
+    std::mutex muxMu;
+    AsyncAv1Encoder av1Worker;
+    if (useAudioTx) audioTx.setMuxMutex(&muxMu);
+
+    AVPacket* pkt = av_packet_alloc();
+    AVPacket* encPkt = av_packet_alloc();
+    AVFrame* decFrame = av_frame_alloc();
+    AVFrame* filtFrame = av_frame_alloc();
+    std::atomic<int64_t> frameCount{0};
+    int64_t lastOutPts = AV_NOPTS_VALUE;
+    double vTb = av_q2d(inFmt->streams[vIdx]->time_base);
+    double lastOutSecs = 0.0;
+    auto renderStart = std::chrono::steady_clock::now();
+
+    auto writeEncPkt = [&](AVPacket* epkt) {
+        av_packet_rescale_ts(epkt, encCtx->time_base, outVStream->time_base);
+        epkt->stream_index = outVStream->index;
+        std::lock_guard<std::mutex> lk(muxMu);
+        if (bsfCtx) {
+            av_bsf_send_packet(bsfCtx, epkt);
+            while (av_bsf_receive_packet(bsfCtx, epkt) == 0) {
+                av_interleaved_write_frame(outFmt, epkt);
+                av_packet_unref(epkt);
+            }
+        } else {
+            av_interleaved_write_frame(outFmt, epkt);
+            av_packet_unref(epkt);
+        }
+    };
+
+    auto reportProgress = [&](int64_t pts) {
+        int64_t n = ++frameCount;
+        if (pts == AV_NOPTS_VALUE) return;
+        double secs = pts * av_q2d(encCtx->time_base);
+        {
+            std::lock_guard<std::mutex> lk(muxMu);
+            if (secs > lastOutSecs) lastOutSecs = secs;
+        }
+        if (n == 1 || (n % 15) == 0) {
+            double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - renderStart).count();
+            double curFps = (elapsed > 0.001) ? (static_cast<double>(n) / elapsed) : 0.0;
+            double curSpd = (elapsed > 0.001) ? (secs / elapsed) : 0.0;
+            std::lock_guard<std::mutex> lk(muxMu);
+            std::printf("fps=%.1f\nspeed=%.2fx\nout_time_us=%lld\nprogress=continue\n",
+                        curFps, curSpd, static_cast<long long>(secs * 1e6));
+            std::fflush(stdout);
+        }
+    };
 
     auto initFilterAndEncoder = [&](AVFrame* firstCudaFrame) -> bool {
         AVRational guessFr = av_guess_frame_rate(inFmt, inFmt->streams[vIdx], nullptr);
@@ -221,7 +278,7 @@ int main() {
         auto* fc = firstCudaFrame->hw_frames_ctx
             ? reinterpret_cast<AVHWFramesContext*>(firstCudaFrame->hw_frames_ctx->data)
             : nullptr;
-        bypassFilter = opt.vfilter.empty() && fc && fc->sw_format == AV_PIX_FMT_NV12 &&
+        bypassFilter = !isAV1 && opt.vfilter.empty() && fc && fc->sw_format == AV_PIX_FMT_NV12 &&
                        (firstCudaFrame->width % 2 == 0) && (firstCudaFrame->height % 2 == 0);
 
         if (bypassFilter) {
@@ -270,24 +327,39 @@ int main() {
 
             encCtx->width = av_buffersink_get_w(bufSink);
             encCtx->height = av_buffersink_get_h(bufSink);
-            encCtx->pix_fmt = AV_PIX_FMT_CUDA;
             encCtx->time_base = av_buffersink_get_time_base(bufSink);
             encCtx->framerate = av_buffersink_get_frame_rate(bufSink);
             if (encCtx->framerate.num <= 0 || encCtx->framerate.den <= 0) encCtx->framerate = guessFr;
-            encCtx->hw_frames_ctx = av_buffer_ref(av_buffersink_get_hw_frames_ctx(bufSink));
+            if (isAV1) {
+                encCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+                encCtx->sample_aspect_ratio = firstCudaFrame->sample_aspect_ratio;
+            } else {
+                encCtx->pix_fmt = AV_PIX_FMT_CUDA;
+                encCtx->hw_frames_ctx = av_buffer_ref(av_buffersink_get_hw_frames_ctx(bufSink));
+            }
         }
         if (isHEVC) encCtx->codec_tag = MKTAG('h', 'v', 'c', '1');
         encCtx->bit_rate = 0;
-        if (opt.maxrateKbps > 0) {
+        encCtx->thread_count = 0;
+        if (!isAV1 && opt.maxrateKbps > 0) {
             encCtx->rc_max_rate = static_cast<int64_t>(opt.maxrateKbps) * 1000;
             encCtx->rc_buffer_size = encCtx->rc_max_rate * 3;
         }
         if (outFmt->oformat->flags & AVFMT_GLOBALHEADER) encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
         AVDictionary* encOpts = nullptr;
-        av_dict_set(&encOpts, "preset", opt.preset.c_str(), 0);
-        av_dict_set(&encOpts, "rc", "vbr", 0);
-        av_dict_set(&encOpts, "cq", std::to_string(opt.cq).c_str(), 0);
-        av_dict_set(&encOpts, "spatial_aq", "1", 0);
+        if (isAV1) {
+            std::string svtPreset = "8";
+            if (opt.preset == "p1") svtPreset = "10";
+            else if (opt.preset == "p7") svtPreset = "6";
+            else if (!opt.preset.empty() && opt.preset[0] != 'p') svtPreset = opt.preset;
+            av_dict_set(&encOpts, "preset", svtPreset.c_str(), 0);
+            av_dict_set(&encOpts, "crf", std::to_string(opt.cq).c_str(), 0);
+        } else {
+            av_dict_set(&encOpts, "preset", opt.preset.c_str(), 0);
+            av_dict_set(&encOpts, "rc", "vbr", 0);
+            av_dict_set(&encOpts, "cq", std::to_string(opt.cq).c_str(), 0);
+            av_dict_set(&encOpts, "spatial_aq", "1", 0);
+        }
         int openRc = avcodec_open2(encCtx, enc, &encOpts);
         av_dict_free(&encOpts);
         if (openRc < 0) return false;
@@ -308,33 +380,10 @@ int main() {
         av_dict_set(&muxOpts, "movflags", "+faststart", 0);
         int hdr = avformat_write_header(outFmt, &muxOpts);
         av_dict_free(&muxOpts);
-        return hdr >= 0;
+        if (hdr < 0) return false;
+        if (isAV1 && !av1Worker.start(encCtx, writeEncPkt, reportProgress)) return false;
+        return true;
     };
-
-    auto writeEncPkt = [&](AVPacket* epkt) {
-        av_packet_rescale_ts(epkt, encCtx->time_base, outVStream->time_base);
-        epkt->stream_index = outVStream->index;
-        if (bsfCtx) {
-            av_bsf_send_packet(bsfCtx, epkt);
-            while (av_bsf_receive_packet(bsfCtx, epkt) == 0) {
-                av_interleaved_write_frame(outFmt, epkt);
-                av_packet_unref(epkt);
-            }
-        } else {
-            av_interleaved_write_frame(outFmt, epkt);
-            av_packet_unref(epkt);
-        }
-    };
-
-    AVPacket* pkt = av_packet_alloc();
-    AVPacket* encPkt = av_packet_alloc();
-    AVFrame* decFrame = av_frame_alloc();
-    AVFrame* filtFrame = av_frame_alloc();
-    int64_t frameCount = 0;
-    int64_t lastOutPts = AV_NOPTS_VALUE;
-    double vTb = av_q2d(inFmt->streams[vIdx]->time_base);
-    double lastOutSecs = 0.0;
-    auto renderStart = std::chrono::steady_clock::now();
 
     struct BufferedAudio { AVPacket* pkt; double s, e, offset; };
     std::vector<BufferedAudio> earlyAudio;
@@ -344,6 +393,7 @@ int main() {
             if (outAStream) {
                 av_packet_rescale_ts(ba.pkt, inAStream->time_base, outAStream->time_base);
                 ba.pkt->stream_index = outAStream->index;
+                std::lock_guard<std::mutex> lk(muxMu);
                 av_interleaved_write_frame(outFmt, ba.pkt);
             } else if (useAudioTx) {
                 audioTx.feedPacket(ba.pkt, ba.s, ba.e, ba.offset, true);
@@ -354,22 +404,14 @@ int main() {
     };
 
     auto encodeAndReport = [&](AVFrame* f) {
+        if (isAV1) {
+            av1Worker.submitGpuFrame(f);
+            return;
+        }
         if (avcodec_send_frame(encCtx, f) >= 0) {
             while (avcodec_receive_packet(encCtx, encPkt) == 0) writeEncPkt(encPkt);
         }
-        ++frameCount;
-        if (f->pts != AV_NOPTS_VALUE) {
-            double secs = f->pts * av_q2d(encCtx->time_base);
-            if (secs > lastOutSecs) lastOutSecs = secs;
-            if (frameCount == 1 || (frameCount % 15) == 0) {
-                double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - renderStart).count();
-                double curFps = (elapsed > 0.001) ? (static_cast<double>(frameCount) / elapsed) : 0.0;
-                double curSpd = (elapsed > 0.001) ? (secs / elapsed) : 0.0;
-                std::printf("fps=%.1f\nspeed=%.2fx\nout_time_us=%lld\nprogress=continue\n",
-                            curFps, curSpd, static_cast<long long>(secs * 1e6));
-                std::fflush(stdout);
-            }
-        }
+        reportProgress(f->pts);
     };
 
     auto processCudaFrame = [&](AVFrame* cf, double outT) -> bool {
@@ -438,6 +480,7 @@ int main() {
                 } else if (outAStream) {
                     av_packet_rescale_ts(pkt, inAStream->time_base, outAStream->time_base);
                     pkt->stream_index = outAStream->index;
+                    std::lock_guard<std::mutex> lk(muxMu);
                     av_interleaved_write_frame(outFmt, pkt);
                 } else if (useAudioTx) {
                     audioTx.feedPacket(pkt, seg.start, seg.end, keptOffset, true);
@@ -468,15 +511,19 @@ int main() {
         }
     }
     if (pipelineReady) {
-        if (useAudioTx) audioTx.flush(true);
         if (!bypassFilter && bufSrc && av_buffersrc_add_frame_flags(bufSrc, nullptr, 0) >= 0) {
             while (av_buffersink_get_frame(bufSink, filtFrame) >= 0) {
                 encodeAndReport(filtFrame);
                 av_frame_unref(filtFrame);
             }
         }
-        avcodec_send_frame(encCtx, nullptr);
-        while (avcodec_receive_packet(encCtx, encPkt) == 0) writeEncPkt(encPkt);
+        if (isAV1) {
+            av1Worker.finish();
+        } else {
+            avcodec_send_frame(encCtx, nullptr);
+            while (avcodec_receive_packet(encCtx, encPkt) == 0) writeEncPkt(encPkt);
+        }
+        if (useAudioTx) audioTx.flush(true);
         av_write_trailer(outFmt);
     }
     double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - renderStart).count();

@@ -51,7 +51,7 @@ func AreClipsCopyCompatible(clips []ProbeInfo) (bool, string) {
 
 func isMP4CopyFriendlyCodec(vCodec string, hasAudio bool, aCodec string) bool {
 	v := strings.ToLower(vCodec)
-	if v != "h264" && v != "hevc" {
+	if v != "h264" && v != "hevc" && v != "av1" {
 		return false
 	}
 	if !hasAudio {
