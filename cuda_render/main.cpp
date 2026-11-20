@@ -161,6 +161,7 @@ int main() {
         return 1;
     }
     decCtx->hw_device_ctx = av_buffer_ref(hwDevCtx);
+    decCtx->extra_hw_frames = 8;
     decCtx->get_format = getCudaFormat;
     if (avcodec_open2(decCtx, dec, nullptr) < 0) {
         std::fprintf(stderr, "Failed to open video decoder with CUDA\n");
@@ -210,51 +211,71 @@ int main() {
     AVFilterGraph* fg = nullptr;
     AVFilterContext *bufSrc = nullptr, *bufSink = nullptr;
     AVBSFContext* bsfCtx = nullptr;
+    bool bypassFilter = false;
     bool pipelineReady = false;
 
     auto initFilterAndEncoder = [&](AVFrame* firstCudaFrame) -> bool {
-        fg = avfilter_graph_alloc();
-        const AVFilter* srcF = avfilter_get_by_name("buffer");
-        const AVFilter* sinkF = avfilter_get_by_name("buffersink");
-        bufSrc = avfilter_graph_alloc_filter(fg, srcF, "in");
-        AVBufferSrcParameters* par = av_buffersrc_parameters_alloc();
         AVRational guessFr = av_guess_frame_rate(inFmt, inFmt->streams[vIdx], nullptr);
         if (guessFr.num <= 0 || guessFr.den <= 0) guessFr = AVRational{30, 1};
-        par->format = AV_PIX_FMT_CUDA;
-        par->width = firstCudaFrame->width;
-        par->height = firstCudaFrame->height;
-        par->time_base = inFmt->streams[vIdx]->time_base;
-        par->frame_rate = guessFr;
-        par->sample_aspect_ratio = firstCudaFrame->sample_aspect_ratio;
-        par->color_range = firstCudaFrame->color_range;
-        par->color_space = firstCudaFrame->colorspace;
-        par->hw_frames_ctx = av_buffer_ref(firstCudaFrame->hw_frames_ctx);
-        if (av_buffersrc_parameters_set(bufSrc, par) < 0) return false;
-        av_free(par);
-        if (avfilter_init_str(bufSrc, nullptr) < 0) return false;
 
-        if (avfilter_graph_create_filter(&bufSink, sinkF, "out", nullptr, nullptr, fg) < 0) return false;
-        std::string fDesc = opt.vfilter.empty()
-            ? "scale_cuda=w=trunc(iw/2)*2:h=trunc(ih/2)*2:format=yuv420p"
-            : opt.vfilter;
-        AVFilterInOut *outputs = avfilter_inout_alloc(), *inputs = avfilter_inout_alloc();
-        outputs->name = av_strdup("in");  outputs->filter_ctx = bufSrc;  outputs->pad_idx = 0; outputs->next = nullptr;
-        inputs->name  = av_strdup("out"); inputs->filter_ctx  = bufSink; inputs->pad_idx  = 0; inputs->next  = nullptr;
-        if (avfilter_graph_parse_ptr(fg, fDesc.c_str(), &inputs, &outputs, nullptr) < 0 ||
-            avfilter_graph_config(fg, nullptr) < 0) {
-            std::fprintf(stderr, "Filtergraph config failed: %s\n", fDesc.c_str());
-            return false;
+        auto* fc = firstCudaFrame->hw_frames_ctx
+            ? reinterpret_cast<AVHWFramesContext*>(firstCudaFrame->hw_frames_ctx->data)
+            : nullptr;
+        bypassFilter = opt.vfilter.empty() && fc && fc->sw_format == AV_PIX_FMT_NV12 &&
+                       (firstCudaFrame->width % 2 == 0) && (firstCudaFrame->height % 2 == 0);
+
+        if (bypassFilter) {
+            encCtx->width = firstCudaFrame->width;
+            encCtx->height = firstCudaFrame->height;
+            encCtx->pix_fmt = AV_PIX_FMT_CUDA;
+            encCtx->time_base = inFmt->streams[vIdx]->time_base;
+            encCtx->framerate = guessFr;
+            encCtx->sample_aspect_ratio = firstCudaFrame->sample_aspect_ratio;
+            encCtx->color_range = firstCudaFrame->color_range;
+            encCtx->colorspace = firstCudaFrame->colorspace;
+            encCtx->hw_frames_ctx = av_buffer_ref(firstCudaFrame->hw_frames_ctx);
+        } else {
+            fg = avfilter_graph_alloc();
+            const AVFilter* srcF = avfilter_get_by_name("buffer");
+            const AVFilter* sinkF = avfilter_get_by_name("buffersink");
+            bufSrc = avfilter_graph_alloc_filter(fg, srcF, "in");
+            AVBufferSrcParameters* par = av_buffersrc_parameters_alloc();
+            par->format = AV_PIX_FMT_CUDA;
+            par->width = firstCudaFrame->width;
+            par->height = firstCudaFrame->height;
+            par->time_base = inFmt->streams[vIdx]->time_base;
+            par->frame_rate = guessFr;
+            par->sample_aspect_ratio = firstCudaFrame->sample_aspect_ratio;
+            par->color_range = firstCudaFrame->color_range;
+            par->color_space = firstCudaFrame->colorspace;
+            par->hw_frames_ctx = av_buffer_ref(firstCudaFrame->hw_frames_ctx);
+            if (av_buffersrc_parameters_set(bufSrc, par) < 0) return false;
+            av_free(par);
+            if (avfilter_init_str(bufSrc, nullptr) < 0) return false;
+
+            if (avfilter_graph_create_filter(&bufSink, sinkF, "out", nullptr, nullptr, fg) < 0) return false;
+            std::string fDesc = opt.vfilter.empty()
+                ? "scale_cuda=w=trunc(iw/2)*2:h=trunc(ih/2)*2:format=yuv420p"
+                : opt.vfilter;
+            AVFilterInOut *outputs = avfilter_inout_alloc(), *inputs = avfilter_inout_alloc();
+            outputs->name = av_strdup("in");  outputs->filter_ctx = bufSrc;  outputs->pad_idx = 0; outputs->next = nullptr;
+            inputs->name  = av_strdup("out"); inputs->filter_ctx  = bufSink; inputs->pad_idx  = 0; inputs->next  = nullptr;
+            if (avfilter_graph_parse_ptr(fg, fDesc.c_str(), &inputs, &outputs, nullptr) < 0 ||
+                avfilter_graph_config(fg, nullptr) < 0) {
+                std::fprintf(stderr, "Filtergraph config failed: %s\n", fDesc.c_str());
+                return false;
+            }
+            avfilter_inout_free(&inputs);
+            avfilter_inout_free(&outputs);
+
+            encCtx->width = av_buffersink_get_w(bufSink);
+            encCtx->height = av_buffersink_get_h(bufSink);
+            encCtx->pix_fmt = AV_PIX_FMT_CUDA;
+            encCtx->time_base = av_buffersink_get_time_base(bufSink);
+            encCtx->framerate = av_buffersink_get_frame_rate(bufSink);
+            if (encCtx->framerate.num <= 0 || encCtx->framerate.den <= 0) encCtx->framerate = guessFr;
+            encCtx->hw_frames_ctx = av_buffer_ref(av_buffersink_get_hw_frames_ctx(bufSink));
         }
-        avfilter_inout_free(&inputs);
-        avfilter_inout_free(&outputs);
-
-        encCtx->width = av_buffersink_get_w(bufSink);
-        encCtx->height = av_buffersink_get_h(bufSink);
-        encCtx->pix_fmt = AV_PIX_FMT_CUDA;
-        encCtx->time_base = av_buffersink_get_time_base(bufSink);
-        encCtx->framerate = av_buffersink_get_frame_rate(bufSink);
-        if (encCtx->framerate.num <= 0 || encCtx->framerate.den <= 0) encCtx->framerate = guessFr;
-        encCtx->hw_frames_ctx = av_buffer_ref(av_buffersink_get_hw_frames_ctx(bufSink));
         if (isHEVC) encCtx->codec_tag = MKTAG('h', 'v', 'c', '1');
         encCtx->bit_rate = 0;
         if (opt.maxrateKbps > 0) {
@@ -332,6 +353,25 @@ int main() {
         earlyAudio.clear();
     };
 
+    auto encodeAndReport = [&](AVFrame* f) {
+        if (avcodec_send_frame(encCtx, f) >= 0) {
+            while (avcodec_receive_packet(encCtx, encPkt) == 0) writeEncPkt(encPkt);
+        }
+        ++frameCount;
+        if (f->pts != AV_NOPTS_VALUE) {
+            double secs = f->pts * av_q2d(encCtx->time_base);
+            if (secs > lastOutSecs) lastOutSecs = secs;
+            if (frameCount == 1 || (frameCount % 15) == 0) {
+                double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - renderStart).count();
+                double curFps = (elapsed > 0.001) ? (static_cast<double>(frameCount) / elapsed) : 0.0;
+                double curSpd = (elapsed > 0.001) ? (secs / elapsed) : 0.0;
+                std::printf("fps=%.1f\nspeed=%.2fx\nout_time_us=%lld\nprogress=continue\n",
+                            curFps, curSpd, static_cast<long long>(secs * 1e6));
+                std::fflush(stdout);
+            }
+        }
+    };
+
     auto processCudaFrame = [&](AVFrame* cf, double outT) -> bool {
         AVFrame* colored = colorProc.apply(cf, outT, opt.overlays, colorErr);
         if (!colored) return false;
@@ -345,25 +385,15 @@ int main() {
             if (!pipelineReady) { av_frame_free(&colored); return false; }
             flushEarlyAudio();
         }
+        if (bypassFilter) {
+            encodeAndReport(colored);
+            av_frame_free(&colored);
+            return true;
+        }
         if (av_buffersrc_add_frame_flags(bufSrc, colored, 0) < 0) { av_frame_free(&colored); return false; }
         av_frame_free(&colored);
         while (av_buffersink_get_frame(bufSink, filtFrame) >= 0) {
-            if (avcodec_send_frame(encCtx, filtFrame) >= 0) {
-                while (avcodec_receive_packet(encCtx, encPkt) == 0) writeEncPkt(encPkt);
-            }
-            ++frameCount;
-            if (filtFrame->pts != AV_NOPTS_VALUE) {
-                double secs = filtFrame->pts * av_q2d(encCtx->time_base);
-                if (secs > lastOutSecs) lastOutSecs = secs;
-                if (frameCount == 1 || (frameCount % 15) == 0) {
-                    double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - renderStart).count();
-                    double curFps = (elapsed > 0.001) ? (static_cast<double>(frameCount) / elapsed) : 0.0;
-                    double curSpd = (elapsed > 0.001) ? (secs / elapsed) : 0.0;
-                    std::printf("fps=%.1f\nspeed=%.2fx\nout_time_us=%lld\nprogress=continue\n",
-                                curFps, curSpd, static_cast<long long>(secs * 1e6));
-                    std::fflush(stdout);
-                }
-            }
+            encodeAndReport(filtFrame);
             av_frame_unref(filtFrame);
         }
         return true;
@@ -439,15 +469,9 @@ int main() {
     }
     if (pipelineReady) {
         if (useAudioTx) audioTx.flush(true);
-        if (av_buffersrc_add_frame_flags(bufSrc, nullptr, 0) >= 0) {
+        if (!bypassFilter && bufSrc && av_buffersrc_add_frame_flags(bufSrc, nullptr, 0) >= 0) {
             while (av_buffersink_get_frame(bufSink, filtFrame) >= 0) {
-                avcodec_send_frame(encCtx, filtFrame);
-                while (avcodec_receive_packet(encCtx, encPkt) == 0) writeEncPkt(encPkt);
-                ++frameCount;
-                if (filtFrame->pts != AV_NOPTS_VALUE) {
-                    double secs = filtFrame->pts * av_q2d(encCtx->time_base);
-                    if (secs > lastOutSecs) lastOutSecs = secs;
-                }
+                encodeAndReport(filtFrame);
                 av_frame_unref(filtFrame);
             }
         }
